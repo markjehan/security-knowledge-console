@@ -237,6 +237,46 @@ class CVERagPipeline:
             "related_controls": self._related_controls(context_docs),
         }
 
+    def query_stream(self, question: str, k: int = 5):
+        """Generator version of query(): yields ("delta", text_chunk) events as
+        the model produces them, then a single terminal ("done", metadata) event
+        once the full answer is in. The grounding check needs the complete answer
+        text (a hallucinated CVE ID could be split across two token chunks), so
+        it can only run after streaming finishes — the UI surfaces it in the
+        final metadata rather than as an inline mid-stream annotation."""
+        context_docs = self.retrieve(question, k)
+
+        if not context_docs:
+            yield "done", {
+                "domain": "cve",
+                "answer": "No relevant CVE data found in the index for this question.",
+                "sources": [],
+                "hallucinated_ids": [],
+                "related_controls": [],
+            }
+            return
+
+        context_text = "\n\n---\n\n".join(doc["text"] for doc in context_docs)
+        with self.llm.messages.stream(
+            model=LLM_MODEL,
+            max_tokens=1024,
+            system=CVE_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {question}"}],
+        ) as stream:
+            raw_answer = ""
+            for chunk in stream.text_stream:
+                raw_answer += chunk
+                yield "delta", chunk
+
+        grounded_answer, hallucinated = self._ground_answer(raw_answer, context_docs)
+        yield "done", {
+            "domain": "cve",
+            "answer": grounded_answer,
+            "sources": [doc["id"] for doc in context_docs],
+            "hallucinated_ids": hallucinated,
+            "related_controls": self._related_controls(context_docs),
+        }
+
 
 class ComplianceRagPipeline:
     def __init__(self):
@@ -266,6 +306,40 @@ class ComplianceRagPipeline:
         answer = message.content[0].text
 
         return {
+            "domain": "compliance",
+            "answer": answer,
+            "sources": [
+                f"{doc['metadata'].get('framework', '')} {doc['metadata'].get('control_id', doc['id'])}"
+                for doc in context_docs
+            ],
+        }
+
+    def query_stream(self, question: str, k: int = 5):
+        """Generator version of query(); see CVERagPipeline.query_stream for the
+        event shape ("delta"/"done")."""
+        context_docs = self.retrieve(question, k)
+
+        if not context_docs:
+            yield "done", {
+                "domain": "compliance",
+                "answer": "No relevant compliance control found in the index for this question.",
+                "sources": [],
+            }
+            return
+
+        context_text = "\n\n---\n\n".join(doc["text"] for doc in context_docs)
+        with self.llm.messages.stream(
+            model=LLM_MODEL,
+            max_tokens=1024,
+            system=COMPLIANCE_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {question}"}],
+        ) as stream:
+            answer = ""
+            for chunk in stream.text_stream:
+                answer += chunk
+                yield "delta", chunk
+
+        yield "done", {
             "domain": "compliance",
             "answer": answer,
             "sources": [

@@ -228,9 +228,9 @@ const queryTitle = document.getElementById("query-title");
 const querySub = document.getElementById("query-sub");
 
 const MODE_META = {
-  auto: { title: "Query — Auto Route", sub: "Ask a question; the console routes it to the right retrieval domain.", endpoint: "/api/query", placeholder: "Ask anything — CVEs or compliance controls..." },
-  cve: { title: "Query — CVE Search", sub: "Grounded Q&A over indexed NVD CVE records.", endpoint: "/api/query/cve", placeholder: "e.g. What CVEs affect Apache 2.4.49?" },
-  compliance: { title: "Query — Compliance Docs", sub: "Grounded Q&A over NIST / CIS / ISO / SOC 2 controls.", endpoint: "/api/query/compliance", placeholder: "e.g. What does NIST say about vulnerability scanning?" },
+  auto: { title: "Query — Auto Route", sub: "Ask a question; the console routes it to the right retrieval domain.", placeholder: "Ask anything — CVEs or compliance controls..." },
+  cve: { title: "Query — CVE Search", sub: "Grounded Q&A over indexed NVD CVE records.", placeholder: "e.g. What CVEs affect Apache 2.4.49?" },
+  compliance: { title: "Query — Compliance Docs", sub: "Grounded Q&A over NIST / CIS / ISO / SOC 2 controls.", placeholder: "e.g. What does NIST say about vulnerability scanning?" },
 };
 
 function setQueryMode(mode) {
@@ -301,12 +301,7 @@ function sourceChipHtml(source) {
   return `<span class="source-chip">${escapeHtml(source)}</span>`;
 }
 
-function renderAnswerBlock(question, domain, data, routedTo) {
-  const el = document.createElement("div");
-  el.className = "transmission";
-  const tagClass = domain === "compliance" ? "compliance" : "cve";
-  const tagLabel = domain === "compliance" ? "Compliance" : "CVE";
-
+function buildFootHtml(data, routedTo) {
   let footHtml = "";
   if (routedTo) {
     footHtml += `<div class="foot-row"><span class="foot-label">Routed</span><span class="route-chip">${escapeHtml(routedTo)}</span></div>`;
@@ -323,6 +318,15 @@ function renderAnswerBlock(question, domain, data, routedTo) {
   if (data.error) {
     footHtml += `<div class="warn-row">⚠ ${escapeHtml(data.error)}</div>`;
   }
+  return footHtml;
+}
+
+function renderAnswerBlock(question, domain, data, routedTo) {
+  const el = document.createElement("div");
+  el.className = "transmission";
+  const tagClass = domain === "compliance" ? "compliance" : "cve";
+  const tagLabel = domain === "compliance" ? "Compliance" : "CVE";
+  const footHtml = buildFootHtml(data, routedTo);
 
   el.innerHTML = `
     <div class="transmission-head">
@@ -336,41 +340,174 @@ function renderAnswerBlock(question, domain, data, routedTo) {
   transmissionLog.prepend(el);
 }
 
+/* ---------- streaming answer block ---------- */
+
+function createStreamingBlock(domain) {
+  const el = document.createElement("div");
+  el.className = "transmission";
+  const tagClass = domain === "compliance" ? "compliance" : "cve";
+  const tagLabel = domain === "compliance" ? "Compliance" : "CVE";
+  el.innerHTML = `
+    <div class="transmission-head">
+      <span class="transmission-tag ${tagClass}">${tagLabel}</span>
+      <span>${new Date().toLocaleTimeString()}</span>
+    </div>
+    <div class="transmission-body"><span class="stream-cursor"></span></div>
+  `;
+  transmissionLog.prepend(el);
+  return {
+    el,
+    bodyEl: el.querySelector(".transmission-body"),
+    raw: "",
+  };
+}
+
+function appendStreamingChunk(block, chunk) {
+  block.raw += chunk;
+  block.bodyEl.innerHTML = renderMarkdown(block.raw) + '<span class="stream-cursor"></span>';
+}
+
+function finalizeStreamingBlock(block, data, routedTo) {
+  block.bodyEl.innerHTML = renderMarkdown(data.answer || block.raw || "No response.");
+  const footHtml = buildFootHtml(data, routedTo);
+  if (footHtml) {
+    const foot = document.createElement("div");
+    foot.className = "transmission-foot";
+    foot.innerHTML = footHtml;
+    block.el.appendChild(foot);
+  }
+}
+
+function streamQuery(question, endpoint, domain, routedToLabel) {
+  return new Promise((resolve) => {
+    const block = createStreamingBlock(domain);
+    const url = `${endpoint}?question=${encodeURIComponent(question)}`;
+    const source = new EventSource(url);
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      resolve();
+    };
+
+    source.addEventListener("delta", (e) => {
+      appendStreamingChunk(block, JSON.parse(e.data).text);
+    });
+    source.addEventListener("done", (e) => {
+      const data = JSON.parse(e.data);
+      finalizeStreamingBlock(block, data, routedToLabel || data.routed_to);
+      pushHistory(question, data.domain || domain);
+      finish();
+    });
+    source.addEventListener("stream_error", (e) => {
+      const data = JSON.parse(e.data);
+      finalizeStreamingBlock(block, { ...data, answer: block.raw }, routedToLabel);
+      pushHistory(question, "error");
+      finish();
+    });
+    // Native EventSource "error": fires on a dropped/failed connection itself
+    // (not a server-reported error — that's "stream_error" above). If we
+    // already have partial or full text, keep it and just stop the spinner;
+    // only show a hard failure message when nothing came through at all.
+    source.addEventListener("error", () => {
+      if (!block.raw) {
+        finalizeStreamingBlock(block, { error: "Streaming connection failed or was interrupted." }, routedToLabel);
+        pushHistory(question, "error");
+      } else {
+        finalizeStreamingBlock(block, { answer: block.raw }, routedToLabel);
+        pushHistory(question, domain);
+      }
+      finish();
+    });
+  });
+}
+
+const STREAM_ENDPOINTS = {
+  auto: "/api/query/stream",
+  cve: "/api/query/cve/stream",
+  compliance: "/api/query/compliance/stream",
+};
+
+function streamAutoQuery(question) {
+  return new Promise((resolve) => {
+    const url = `${STREAM_ENDPOINTS.auto}?question=${encodeURIComponent(question)}`;
+    const source = new EventSource(url);
+    let settled = false;
+    const finish = () => { if (!settled) { settled = true; source.close(); resolve(); } };
+
+    // Single-domain path: one streaming block, filled in once the router's
+    // choice ("meta") tells us which tag/color to render it under.
+    let singleBlock = null;
+    // Ambiguous ("both") path: two separate blocks, no token streaming —
+    // see the /api/query/stream docstring for why.
+    let cveBlock = null;
+    let complianceBlock = null;
+    const bothLabel = "both (ambiguous — merged CVE + compliance)";
+
+    source.addEventListener("meta", (e) => {
+      const { routed_to } = JSON.parse(e.data);
+      if (routed_to === "both") {
+        cveBlock = createStreamingBlock("cve");
+        complianceBlock = createStreamingBlock("compliance");
+      } else {
+        singleBlock = createStreamingBlock(routed_to);
+      }
+    });
+    source.addEventListener("delta", (e) => {
+      if (singleBlock) appendStreamingChunk(singleBlock, JSON.parse(e.data).text);
+    });
+    source.addEventListener("done", (e) => {
+      const data = JSON.parse(e.data);
+      if (singleBlock) finalizeStreamingBlock(singleBlock, data, `auto → ${data.domain}`);
+      pushHistory(question, data.domain);
+      finish();
+    });
+    source.addEventListener("done_cve", (e) => {
+      if (cveBlock) finalizeStreamingBlock(cveBlock, JSON.parse(e.data), bothLabel);
+    });
+    source.addEventListener("done_compliance", (e) => {
+      if (complianceBlock) finalizeStreamingBlock(complianceBlock, JSON.parse(e.data), bothLabel);
+      pushHistory(question, "both");
+      finish();
+    });
+    source.addEventListener("stream_error", (e) => {
+      const data = JSON.parse(e.data);
+      if (singleBlock) finalizeStreamingBlock(singleBlock, { ...data, answer: singleBlock.raw }, null);
+      if (cveBlock) finalizeStreamingBlock(cveBlock, data, bothLabel);
+      if (complianceBlock) finalizeStreamingBlock(complianceBlock, data, bothLabel);
+      if (!singleBlock && !cveBlock && !complianceBlock) renderAnswerBlock(question, "cve", data);
+      pushHistory(question, "error");
+      finish();
+    });
+    source.addEventListener("error", () => {
+      const fallback = { error: "Streaming connection failed or was interrupted." };
+      if (singleBlock && !singleBlock.raw) finalizeStreamingBlock(singleBlock, fallback, null);
+      else if (singleBlock) finalizeStreamingBlock(singleBlock, { answer: singleBlock.raw }, null);
+      if (cveBlock && !cveBlock.raw) finalizeStreamingBlock(cveBlock, fallback, bothLabel);
+      if (complianceBlock && !complianceBlock.raw) finalizeStreamingBlock(complianceBlock, fallback, bothLabel);
+      if (!singleBlock && !cveBlock && !complianceBlock) renderAnswerBlock(question, "cve", fallback);
+      pushHistory(question, "error");
+      finish();
+    });
+  });
+}
+
 async function submitQuery(question) {
   addQueryTransmission(question);
   const mode = state.queryMode;
-  const meta = MODE_META[mode];
   queryInput.disabled = true;
   const submitBtn = queryForm.querySelector(".query-submit");
   submitBtn.disabled = true;
   submitBtn.textContent = "Transmitting…";
 
   try {
-    const res = await fetch(meta.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      renderAnswerBlock(question, "cve", { error: data.error || `Request failed (${res.status}).` });
-      pushHistory(question, "error");
-      return;
-    }
-
-    if (mode === "auto" && data.routed_to === "both") {
-      renderAnswerBlock(question, "cve", data.cve, "both (ambiguous — merged CVE + compliance)");
-      renderAnswerBlock(question, "compliance", data.compliance, "both (ambiguous — merged CVE + compliance)");
-      pushHistory(question, "both");
+    if (mode === "auto") {
+      await streamAutoQuery(question);
     } else {
-      const domain = data.domain || (data.routed_to === "compliance" ? "compliance" : "cve");
-      const routedTo = mode === "auto" ? `auto → ${domain}` : null;
-      renderAnswerBlock(question, domain, data, routedTo);
-      pushHistory(question, domain);
+      await streamQuery(question, STREAM_ENDPOINTS[mode], mode, null);
     }
-  } catch (err) {
-    renderAnswerBlock(question, "cve", { error: "Transmission failed — could not reach the console backend." });
   } finally {
     queryInput.disabled = false;
     submitBtn.disabled = false;

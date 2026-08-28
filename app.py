@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from anthropic import APIError
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, Response, request, jsonify, render_template
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from rag import CVERagPipeline, ComplianceRagPipeline, QueryRouter
@@ -22,16 +22,63 @@ MAX_QUESTION_LENGTH = 500
 COMPLIANCE_CORPUS_PATH = os.path.join(os.path.dirname(__file__), "data", "compliance_corpus.json")
 
 
+def _validate_question(question: str) -> tuple | None:
+    """Shared length/emptiness check. Returns an error response tuple, or
+    None if the question is valid."""
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+    if len(question) > MAX_QUESTION_LENGTH:
+        return jsonify({"error": f"question must be under {MAX_QUESTION_LENGTH} characters"}), 400
+    return None
+
+
 def _get_question() -> tuple[str, tuple | None]:
-    """Shared validation for the /api/query* endpoints. Returns
+    """Shared validation for the JSON-body /api/query* endpoints. Returns
     (question, None) on success or ("", error_response) on failure."""
     data = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()
-    if not question:
-        return "", (jsonify({"error": "question is required"}), 400)
-    if len(question) > MAX_QUESTION_LENGTH:
-        return "", (jsonify({"error": f"question must be under {MAX_QUESTION_LENGTH} characters"}), 400)
-    return question, None
+    err = _validate_question(question)
+    return ("", err) if err else (question, None)
+
+
+def _get_question_from_args() -> tuple[str, tuple | None]:
+    """Same validation for the SSE streaming endpoints, which use GET +
+    querystring because the browser's EventSource API cannot send a POST
+    body or custom headers."""
+    question = (request.args.get("question") or "").strip()
+    err = _validate_question(question)
+    return ("", err) if err else (question, None)
+
+
+def _sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _stream_response(generator):
+    """Wraps a query_stream() generator as an SSE HTTP response, translating
+    ("delta"/"done") tuples into named SSE events and turning any mid-stream
+    LLM error into a terminal "error" event instead of a raw crash (the
+    APIError errorhandler above only catches errors raised before the
+    response starts streaming, not ones raised while it's in flight)."""
+    def generate():
+        try:
+            for kind, payload in generator:
+                if kind == "delta":
+                    yield _sse_event("delta", {"text": payload})
+                else:
+                    yield _sse_event("done", payload)
+        except APIError as err:
+            yield _sse_event("stream_error", {
+                "error": "The language model backend returned an error. Check that "
+                         "ANTHROPIC_API_KEY is set correctly in your .env file.",
+                "detail": str(err),
+            })
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.errorhandler(APIError)
@@ -116,6 +163,71 @@ def api_query_auto():
         "cve": cve_result,
         "compliance": compliance_result,
     })
+
+
+@app.route("/api/query/cve/stream")
+@limiter.limit("20 per minute")
+def api_query_cve_stream():
+    question, err = _get_question_from_args()
+    if err:
+        return err
+    return _stream_response(get_cve_pipeline().query_stream(question))
+
+
+@app.route("/api/query/compliance/stream")
+@limiter.limit("20 per minute")
+def api_query_compliance_stream():
+    question, err = _get_question_from_args()
+    if err:
+        return err
+    return _stream_response(get_compliance_pipeline().query_stream(question))
+
+
+@app.route("/api/query/stream")
+@limiter.limit("20 per minute")
+def api_query_auto_stream():
+    """Auto-routed streaming endpoint, single connection. Always emits a
+    "meta" event first announcing the routing decision, so the frontend
+    knows up front whether to render one streaming panel or two — before
+    any "delta"/"done" (single-domain) or "done_cve"/"done_compliance"
+    (ambiguous "both") events follow. When it's ambiguous, true streaming
+    would mean interleaving two independent token streams into one UI panel
+    each, which isn't worth the complexity — both pipelines just run to
+    completion and land as two normal "done_*" events with no deltas."""
+    question, err = _get_question_from_args()
+    if err:
+        return err
+
+    domain = QueryRouter.classify(question)
+
+    def generate():
+        yield _sse_event("meta", {"routed_to": domain})
+        try:
+            if domain == "cve":
+                for kind, payload in get_cve_pipeline().query_stream(question):
+                    if kind == "done":
+                        payload = {**payload, "routed_to": "cve"}
+                    yield _sse_event(kind, payload)
+            elif domain == "compliance":
+                for kind, payload in get_compliance_pipeline().query_stream(question):
+                    if kind == "done":
+                        payload = {**payload, "routed_to": "compliance"}
+                    yield _sse_event(kind, payload)
+            else:
+                yield _sse_event("done_cve", get_cve_pipeline().query(question))
+                yield _sse_event("done_compliance", get_compliance_pipeline().query(question))
+        except APIError as err:
+            yield _sse_event("stream_error", {
+                "error": "The language model backend returned an error. Check that "
+                         "ANTHROPIC_API_KEY is set correctly in your .env file.",
+                "detail": str(err),
+            })
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.route("/api/stats")
