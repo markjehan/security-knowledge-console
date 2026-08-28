@@ -11,6 +11,42 @@
     {
       "question": "Is there a known vulnerability in Log4j related to JNDI lookups?",
       "expected_cve_ids": ["CVE-2021-44228"]
+    },
+    {
+      "question": "What is the CVE number for Heartbleed?",
+      "expected_cve_ids": ["CVE-2014-0160"]
+    },
+    {
+      "question": "What is EternalBlue's CVE identifier?",
+      "expected_cve_ids": ["CVE-2017-0144"]
+    },
+    {
+      "question": "What CVE is associated with ProxyLogon in Microsoft Exchange Server?",
+      "expected_cve_ids": ["CVE-2021-26855"]
+    },
+    {
+      "question": "What CVEs make up the ProxyShell exploit chain in Exchange Server?",
+      "expected_cve_ids": ["CVE-2021-34523", "CVE-2021-31207"]
+    },
+    {
+      "question": "What is the CVE for the Apache Struts remote code execution vulnerability exploited in the Equifax breach?",
+      "expected_cve_ids": ["CVE-2017-5638"]
+    },
+    {
+      "question": "What is the Dirty COW Linux kernel privilege escalation CVE?",
+      "expected_cve_ids": ["CVE-2016-5195"]
+    },
+    {
+      "question": "Are there any known remote code execution vulnerabilities in Apache Struts 2 involving Content-Type headers?",
+      "expected_cve_ids": ["CVE-2017-5638"]
+    },
+    {
+      "question": "What CVE covers the Log4j denial-of-service issue found shortly after the original Log4Shell fix (CVE-2021-44228)?",
+      "expected_cve_ids": ["CVE-2021-45046"]
+    },
+    {
+      "question": "Is CVE-2021-41773 a path traversal vulnerability?",
+      "expected_cve_ids": ["CVE-2021-41773"]
     }
   ],
   "compliance": [
@@ -25,12 +61,54 @@
     {
       "question": "What does NIST 800-53 require for input validation to prevent injection attacks?",
       "expected_control_ids": ["SI-10"]
+    },
+    {
+      "question": "What does NIST SP 800-53 say about patching and flaw remediation?",
+      "expected_control_ids": ["SI-2"]
+    },
+    {
+      "question": "What does NIST 800-53 require for identifying and authenticating organizational users?",
+      "expected_control_ids": ["IA-2"]
+    },
+    {
+      "question": "What does NIST 800-53 say about account management?",
+      "expected_control_ids": ["AC-2"]
+    },
+    {
+      "question": "What does NIST 800-53 require regarding encryption of data in transit?",
+      "expected_control_ids": ["SC-8"]
+    },
+    {
+      "question": "What does the NIST Cybersecurity Framework say about maintaining a vulnerability management plan?",
+      "expected_control_ids": ["PR.IP-12"]
+    },
+    {
+      "question": "Which CIS control covers secure configuration of enterprise assets and software?",
+      "expected_control_ids": ["CIS-04"]
+    },
+    {
+      "question": "What does ISO 27001 Annex A say about managing technical vulnerabilities?",
+      "expected_control_ids": ["A.8.8"]
+    },
+    {
+      "question": "Which CIS control addresses application software security?",
+      "expected_control_ids": ["CIS-16"]
+    },
+    {
+      "question": "What does ISO 27001 Annex A require for configuration management?",
+      "expected_control_ids": ["A.8.9"]
     }
   ],
   "routing": [
     { "question": "What CVEs affect OpenSSL 1.0.1?", "expected_domain": "cve" },
     { "question": "What is the CVSS score for CVE-2021-44228?", "expected_domain": "cve" },
     { "question": "What does ISO 27001 A.8.8 require?", "expected_domain": "compliance" },
-    { "question": "Which NIST control covers account management?", "expected_domain": "compliance" }
+    { "question": "Which NIST control covers account management?", "expected_domain": "compliance" },
+    { "question": "Is there a patch available for CVE-2017-0144?", "expected_domain": "cve" },
+    { "question": "What products are affected by the Log4Shell vulnerability?", "expected_domain": "cve" },
+    { "question": "What CIS controls relate to application software security?", "expected_domain": "compliance" },
+    { "question": "What compliance framework requires vulnerability scanning?", "expected_domain": "compliance" },
+    { "question": "What is the CVE number for the WordPress plugin vulnerability CVE-2020-35932?", "expected_domain": "cve" },
+    { "question": "What does NIST CSF DE.CM-8 require?", "expected_domain": "compliance" }
   ]
 }

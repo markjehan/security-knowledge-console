@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from collections import Counter
 from dotenv import load_dotenv
 
@@ -299,36 +300,47 @@ def api_cves():
     collection = get_cve_pipeline().retriever.collection
 
     if _cve_browse_cache is None:
-        rows = []
-        offset = 0
-        page_size = 5000
-        while True:
-            page = collection.get(include=["metadatas", "documents"], limit=page_size, offset=offset)
-            ids = page["ids"]
-            if not ids:
-                break
-            for _id, meta, doc in zip(ids, page["metadatas"], page["documents"]):
-                first_line_desc = doc.split("Description:", 1)[-1].strip()
-                rows.append({
-                    "cve_id": _id,
-                    "severity": meta.get("severity", "UNKNOWN"),
-                    "score": meta.get("score", -1.0),
-                    "published": meta.get("published", ""),
-                    "cwe_ids": [c for c in meta.get("cwe_ids", "").split(",") if c],
-                    "summary": first_line_desc[:220] + ("…" if len(first_line_desc) > 220 else ""),
-                })
-            offset += len(ids)
-            if len(ids) < page_size:
-                break
-        _cve_browse_cache = rows
+        # threaded=True means two first-time requests could race into this
+        # branch together; the lock makes the ~54k-row scan run once instead
+        # of twice, not because a torn/partial cache would be unsafe to read.
+        with _cve_browse_cache_lock:
+            if _cve_browse_cache is None:
+                rows = []
+                offset = 0
+                page_size = 5000
+                while True:
+                    page = collection.get(include=["metadatas", "documents"], limit=page_size, offset=offset)
+                    ids = page["ids"]
+                    if not ids:
+                        break
+                    for _id, meta, doc in zip(ids, page["metadatas"], page["documents"]):
+                        first_line_desc = doc.split("Description:", 1)[-1].strip()
+                        rows.append({
+                            "cve_id": _id,
+                            "severity": meta.get("severity", "UNKNOWN"),
+                            "score": meta.get("score", -1.0),
+                            "published": meta.get("published", ""),
+                            "cwe_ids": [c for c in meta.get("cwe_ids", "").split(",") if c],
+                            "summary": first_line_desc[:220] + ("…" if len(first_line_desc) > 220 else ""),
+                        })
+                    offset += len(ids)
+                    if len(ids) < page_size:
+                        break
+                _cve_browse_cache = rows
 
     rows = _cve_browse_cache
+
+    def _safe_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     q = (request.args.get("q") or "").strip().lower()
     severity = (request.args.get("severity") or "").strip().upper()
     sort = request.args.get("sort", "published_desc")
-    limit = min(int(request.args.get("limit", 100)), 500)
-    offset = int(request.args.get("offset", 0))
+    limit = min(max(_safe_int(request.args.get("limit"), 100), 1), 500)
+    offset = max(_safe_int(request.args.get("offset"), 0), 0)
 
     filtered = rows
     if q:
@@ -352,6 +364,7 @@ def api_cves():
 
 
 _cve_browse_cache = None
+_cve_browse_cache_lock = threading.Lock()
 
 
 REFRESH_LOG_PATH = os.path.join(os.path.dirname(__file__), "data", "last_refresh.json")

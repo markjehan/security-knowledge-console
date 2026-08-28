@@ -198,6 +198,20 @@ def _context_preview(doc: dict, max_len: int = 500) -> dict:
     }
 
 
+def ground_answer(answer: str, context_docs: list[dict]) -> tuple[str, list[str]]:
+    """Flags any CVE ID the model cites that wasn't actually in the retrieved
+    context, appending an inline [UNVERIFIED] marker rather than silently
+    trusting it. A standalone function (not a pipeline method) specifically so
+    this — the app's core anti-hallucination safeguard — can be unit tested
+    without needing a live Chroma/Anthropic-backed pipeline instance."""
+    context_ids = {doc["id"] for doc in context_docs}
+    cited_ids = set(CVE_ID_PATTERN.findall(answer))
+    hallucinated = cited_ids - context_ids
+    for bad_id in hallucinated:
+        answer = answer.replace(bad_id, f"{bad_id} [UNVERIFIED - not in retrieved sources]")
+    return answer, sorted(hallucinated)
+
+
 class CVERagPipeline:
     def __init__(self):
         self.retriever = HybridRetriever("cves")
@@ -205,14 +219,6 @@ class CVERagPipeline:
 
     def retrieve(self, query: str, k: int = 5) -> list[dict]:
         return self.retriever.retrieve(query, k)
-
-    def _ground_answer(self, answer: str, context_docs: list[dict]) -> tuple[str, list[str]]:
-        context_ids = {doc["id"] for doc in context_docs}
-        cited_ids = set(CVE_ID_PATTERN.findall(answer))
-        hallucinated = cited_ids - context_ids
-        for bad_id in hallucinated:
-            answer = answer.replace(bad_id, f"{bad_id} [UNVERIFIED - not in retrieved sources]")
-        return answer, sorted(hallucinated)
 
     def _related_controls(self, context_docs: list[dict]) -> list[dict]:
         cwe_ids = set()
@@ -242,7 +248,7 @@ class CVERagPipeline:
             messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {question}"}],
         )
         raw_answer = message.content[0].text
-        grounded_answer, hallucinated = self._ground_answer(raw_answer, context_docs)
+        grounded_answer, hallucinated = ground_answer(raw_answer, context_docs)
 
         return {
             "domain": "cve",
@@ -298,7 +304,7 @@ class CVERagPipeline:
             final_message = stream.get_final_message()
         generation_ms = round((time.perf_counter() - t1) * 1000)
 
-        grounded_answer, hallucinated = self._ground_answer(raw_answer, context_docs)
+        grounded_answer, hallucinated = ground_answer(raw_answer, context_docs)
         yield "done", {
             "domain": "cve",
             "answer": grounded_answer,

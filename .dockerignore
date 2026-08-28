@@ -10,7 +10,4 @@ __pycache__/
 eval/
 tests/
 .github/
-DESIGN.md
-PRODUCT.md
-README.md
 *.md

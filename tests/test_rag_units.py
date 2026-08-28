@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rag import expand_query, QueryRouter, CVE_ID_PATTERN
+from rag import expand_query, QueryRouter, CVE_ID_PATTERN, ground_answer
 
 
 def test_expand_query_adds_known_alias():
@@ -42,3 +42,35 @@ def test_router_classifies_compliance_leaning_question():
 
 def test_router_falls_back_to_both_when_ambiguous():
     assert QueryRouter.classify("hello") == "both"
+
+
+def test_ground_answer_passes_through_when_all_citations_are_retrieved():
+    context = [{"id": "CVE-2021-44228", "text": "..."}]
+    answer = "This is Log4Shell (CVE-2021-44228)."
+    grounded, hallucinated = ground_answer(answer, context)
+    assert grounded == answer
+    assert hallucinated == []
+
+
+def test_ground_answer_flags_citation_not_in_context():
+    context = [{"id": "CVE-2021-44228", "text": "..."}]
+    answer = "This relates to CVE-2099-99999 as well."
+    grounded, hallucinated = ground_answer(answer, context)
+    assert hallucinated == ["CVE-2099-99999"]
+    assert "[UNVERIFIED - not in retrieved sources]" in grounded
+    assert "CVE-2099-99999 [UNVERIFIED - not in retrieved sources]" in grounded
+
+
+def test_ground_answer_flags_only_the_uncited_id_among_several():
+    context = [{"id": "CVE-2021-44228", "text": "..."}]
+    answer = "Compare CVE-2021-44228 with the unrelated CVE-2099-99999."
+    grounded, hallucinated = ground_answer(answer, context)
+    assert hallucinated == ["CVE-2099-99999"]
+    assert "CVE-2021-44228 with" in grounded  # untouched, still grounded
+    assert "CVE-2099-99999 [UNVERIFIED" in grounded
+
+
+def test_ground_answer_with_no_context_flags_every_citation():
+    answer = "See CVE-2021-44228."
+    grounded, hallucinated = ground_answer(answer, [])
+    assert hallucinated == ["CVE-2021-44228"]

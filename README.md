@@ -196,10 +196,20 @@ environment, rather than implying a live-update capability that isn't there.
 - `GET /healthz` — health check.
 
 ## 11. Docker Instructions
+The image **bakes in `data/chroma/` at build time** (it's excluded from git via
+`.gitignore`, but *not* from `.dockerignore`) so the container has a working index the
+moment it starts — no separate ingestion step or volume needed on first run:
+
 ```bash
 docker build -t security-knowledge-assistant .
-docker run -p 8080:8080 --env-file .env -v $(pwd)/data:/app/data security-knowledge-assistant
+docker run -p 8080:8080 --env-file .env security-knowledge-assistant
 ```
+
+Run `ingest.py`/`ingest_compliance.py` locally at least once before building the image
+so `data/chroma/` exists to be copied in (see Local Setup Instructions above). If you
+want the *running container* to read/write the index from the host instead of the
+copy baked into the image (e.g. to refresh data without rebuilding), mount over it
+explicitly: `-v $(pwd)/data/chroma:/app/data/chroma`.
 
 ## Evaluation
 `eval/evaluate.py` runs a labeled test set (`eval/test_set.json`, split into `cve`,
@@ -212,15 +222,18 @@ docker run -p 8080:8080 --env-file .env -v $(pwd)/data:/app/data security-knowle
 python eval/evaluate.py
 ```
 
-**Measured results** (retrieval + routing layers, against the 53,739-CVE / 15-control
-demo dataset above; Answer Correctness/Grounding Rate additionally require a valid
-`ANTHROPIC_API_KEY` to run the generation step):
+**Measured results** (12 CVE cases, 12 compliance cases, 10 routing cases; against the
+53,739-CVE / 15-control demo dataset above; Answer Correctness/Grounding Rate require a
+valid `ANTHROPIC_API_KEY` to run the generation step):
 
 | Metric | Result |
 |---|---|
-| CVE Retrieval Recall@5 | 5/6 (83%) |
-| Compliance Retrieval Recall@5 | 3/3 (100%) |
-| Routing Accuracy | 4/4 (100%) |
+| CVE Retrieval Recall@5 | 8/12 (67%) |
+| CVE Answer Correctness | 10/12 (83%) |
+| CVE Grounding Rate | 92% |
+| Compliance Retrieval Recall@5 | 12/12 (100%) |
+| Compliance Answer Correctness | 9/12 (75%) |
+| Routing Accuracy | 9/10 (90%) |
 
 Two retrieval bugs were found and fixed while building this evaluation harness — worth
 including in a report as evidence of genuine iteration, not just "it worked first try":
@@ -237,14 +250,41 @@ including in a report as evidence of genuine iteration, not just "it worked firs
    (`HybridRetriever._exact_id_hits`) so a literal CVE ID in the query always retrieves
    that record directly, regardless of ranking.
 
-The one remaining recall miss (`"Is there a known vulnerability in Log4j related to JNDI
-lookups?"`) is a genuine RAG limitation worth discussing in a report: the phrasing
-doesn't literally name the CVE and isn't covered by the alias-expansion table, so neither
-BM25 nor the embedding model surfaces CVE-2021-44228 in the top 5 for that exact wording.
+**Findings from expanding the test set to 34 cases**, each a genuine, specific RAG
+limitation worth discussing in a report rather than a vague "results may vary":
 
-Expand `eval/test_set.json` with more cases for a more robust evaluation before
-submission — this is the section most worth strengthening for report/dissertation
-credibility.
+- **The grounding check catching itself in the metric.** For paraphrased questions that
+  don't literally name a CVE (e.g. *"Is there a known vulnerability in Log4j related to
+  JNDI lookups?"* or *"...exploited in the Equifax breach?"*), retrieval sometimes misses
+  the target CVE in the top 5 — but the model still cites the correct ID from its own
+  training knowledge anyway. The grounding check correctly flags these as
+  `[UNVERIFIED]` (both appear in `hallucinated_ids`), which is exactly the intended
+  behavior — but it also means the harness's naive `cve_id in answer_text` correctness
+  check can't distinguish "answered correctly from grounded context" from "guessed
+  correctly and got caught." This is a real, demonstrable case of the safety mechanism
+  doing its job, and arguably a better thing to show a marker than a clean 100% score.
+- **CIS control ID format mismatch.** Three compliance "Answer Correctness" misses are
+  all CIS questions where retrieval found the right control (Recall@5 was 100%), but the
+  model wrote it out following the system prompt's own example format — `"CIS Control 7"`
+  — rather than the corpus's `control_id` field `"CIS-07"`. The retrieval and generation
+  are both working; the eval harness's exact-substring check is simply too strict for
+  this one framework's citation convention. A more forgiving matcher (e.g. extracting the
+  trailing number) would fix the *metric*, not the *system*.
+- **Narrative-phrasing recall miss on Struts.** Questions naming CVE-2017-5638 by
+  incident context ("the Equifax breach") or mechanism ("Content-Type header RCE")
+  instead of product+version wording don't retrieve it in the top 5 — neither BM25 nor
+  the embedding model bridges that vocabulary gap, and it isn't in the alias-expansion
+  table (unlike Log4Shell/Heartbleed/EternalBlue). Expanding `VULN_ALIASES` in `rag.py`
+  would close this specific gap but doesn't generalize to the next named exploit.
+- **One routing false positive**: *"What CIS controls relate to application software
+  security?"* routes to `"both"` instead of `"compliance"`, because `QueryRouter`'s
+  CVE-stem list includes `"software"` — a legitimate CVE-domain word ("affected
+  software") that also shows up naturally in compliance-domain questions. A cheap
+  keyword classifier will always have this class of ambiguity; it's a documented
+  tradeoff (see `QueryRouter` docstring in `rag.py`), not a bug to silently patch over.
+
+Re-run with `python eval/evaluate.py`; per-case detail (including which exact IDs were
+retrieved and which were flagged unverified) prints as JSON at the end of the run.
 
 ## Notes on Scope & Limitations (worth stating explicitly in a report)
 - The compliance corpus is small and curated by hand for this project, not a complete
