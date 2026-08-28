@@ -1,3 +1,13 @@
+---
+title: Security Knowledge Assistant
+emoji: 🛡️
+colorFrom: green
+colorTo: purple
+sdk: docker
+app_port: 8080
+pinned: false
+---
+
 # Security Knowledge Assistant — Two-Domain RAG Chatbot
 
 ## 1. Problem Statement
