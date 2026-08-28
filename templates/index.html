@@ -74,6 +74,9 @@
           <span id="refresh-status">LAST REFRESH: &mdash;</span>
           <span class="divider"></span>
           <span id="clock">&mdash;</span>
+          <span class="divider"></span>
+          <button class="icon-btn" id="palette-trigger" title="Command palette (Ctrl/Cmd+K)">⌘K</button>
+          <button class="icon-btn" id="architecture-trigger" title="How this works">?</button>
         </div>
       </div>
 
@@ -227,13 +230,39 @@
             <p>Queries transmitted this session (stored locally in this browser only).</p>
           </div>
         </div>
-        <button class="history-clear" id="history-clear">Clear history</button>
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+          <button class="history-clear" id="history-clear">Clear history</button>
+          <button class="history-clear" id="history-export">Export session (.md)</button>
+        </div>
         <div class="history-list" id="history-list">
           <div class="empty-log">NO HISTORY YET</div>
         </div>
       </section>
     </div>
   </div>
+
+  <!-- COMMAND PALETTE -->
+  <div class="modal-overlay" id="palette-overlay" hidden>
+    <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <input class="palette-input" id="palette-input" type="text" placeholder="Jump to a view or try a question…" autocomplete="off" />
+      <div class="palette-results" id="palette-results"></div>
+      <div class="palette-hint">↑↓ navigate &middot; Enter select &middot; Esc close</div>
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE MODAL -->
+  <div class="modal-overlay" id="architecture-overlay" hidden>
+    <div class="architecture-modal" role="dialog" aria-modal="true" aria-label="How this works">
+      <div class="architecture-head">
+        <h2>How this console works</h2>
+        <button class="icon-btn" id="architecture-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="architecture-body" id="architecture-body"></div>
+    </div>
+  </div>
+
+  <!-- TOASTS -->
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

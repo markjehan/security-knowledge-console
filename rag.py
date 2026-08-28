@@ -17,6 +17,7 @@ CVE IDs are dangerous in a security-advisory context.
 """
 import os
 import re
+import time
 from itertools import zip_longest
 import chromadb
 from rank_bm25 import BM25Okapi
@@ -184,6 +185,19 @@ context does not contain enough information to answer, say so explicitly rather 
 guessing or relying on general knowledge of the standard."""
 
 
+def _context_preview(doc: dict, max_len: int = 500) -> dict:
+    """Truncated view of a retrieved document for the "show your work" UI
+    panel — the full doc text (sometimes 1-2KB for a CVE record) is what the
+    LLM actually saw, but the panel only needs enough to let a reader verify
+    the citation, not the entire record."""
+    text = doc["text"]
+    return {
+        "id": doc["id"],
+        "text": text[:max_len] + ("…" if len(text) > max_len else ""),
+        "metadata": doc.get("metadata", {}),
+    }
+
+
 class CVERagPipeline:
     def __init__(self):
         self.retriever = HybridRetriever("cves")
@@ -217,6 +231,7 @@ class CVERagPipeline:
                 "sources": [],
                 "hallucinated_ids": [],
                 "related_controls": [],
+                "retrieved_context": [],
             }
 
         context_text = "\n\n---\n\n".join(doc["text"] for doc in context_docs)
@@ -235,16 +250,24 @@ class CVERagPipeline:
             "sources": [doc["id"] for doc in context_docs],
             "hallucinated_ids": hallucinated,
             "related_controls": self._related_controls(context_docs),
+            "retrieved_context": [_context_preview(d) for d in context_docs],
+            "usage": {"input_tokens": message.usage.input_tokens, "output_tokens": message.usage.output_tokens},
         }
 
     def query_stream(self, question: str, k: int = 5):
-        """Generator version of query(): yields ("delta", text_chunk) events as
-        the model produces them, then a single terminal ("done", metadata) event
-        once the full answer is in. The grounding check needs the complete answer
-        text (a hallucinated CVE ID could be split across two token chunks), so
-        it can only run after streaming finishes — the UI surfaces it in the
-        final metadata rather than as an inline mid-stream annotation."""
+        """Generator version of query(). Yields, in order:
+          ("stage", msg)  - human-readable progress notes (retrieval, generation)
+          ("delta", text) - token chunks as the model produces them
+          ("done", meta)  - final answer + citations + retrieved context once done
+
+        The grounding check needs the complete answer text (a hallucinated CVE
+        ID could be split across two token chunks), so it can only run after
+        streaming finishes — the UI surfaces it in the final metadata rather
+        than as an inline mid-stream annotation."""
+        yield "stage", {"message": f"Searching {self.retriever.collection.count():,} CVE records…"}
+        t0 = time.perf_counter()
         context_docs = self.retrieve(question, k)
+        retrieval_ms = round((time.perf_counter() - t0) * 1000)
 
         if not context_docs:
             yield "done", {
@@ -253,10 +276,15 @@ class CVERagPipeline:
                 "sources": [],
                 "hallucinated_ids": [],
                 "related_controls": [],
+                "retrieved_context": [],
+                "timing": {"retrieval_ms": retrieval_ms, "generation_ms": 0},
             }
             return
 
+        yield "stage", {"message": f"Retrieved {len(context_docs)} source(s) in {retrieval_ms}ms — generating answer…"}
+
         context_text = "\n\n---\n\n".join(doc["text"] for doc in context_docs)
+        t1 = time.perf_counter()
         with self.llm.messages.stream(
             model=LLM_MODEL,
             max_tokens=1024,
@@ -267,6 +295,8 @@ class CVERagPipeline:
             for chunk in stream.text_stream:
                 raw_answer += chunk
                 yield "delta", chunk
+            final_message = stream.get_final_message()
+        generation_ms = round((time.perf_counter() - t1) * 1000)
 
         grounded_answer, hallucinated = self._ground_answer(raw_answer, context_docs)
         yield "done", {
@@ -275,6 +305,12 @@ class CVERagPipeline:
             "sources": [doc["id"] for doc in context_docs],
             "hallucinated_ids": hallucinated,
             "related_controls": self._related_controls(context_docs),
+            "retrieved_context": [_context_preview(d) for d in context_docs],
+            "timing": {"retrieval_ms": retrieval_ms, "generation_ms": generation_ms},
+            "usage": {
+                "input_tokens": final_message.usage.input_tokens,
+                "output_tokens": final_message.usage.output_tokens,
+            },
         }
 
 
@@ -294,6 +330,7 @@ class ComplianceRagPipeline:
                 "domain": "compliance",
                 "answer": "No relevant compliance control found in the index for this question.",
                 "sources": [],
+                "retrieved_context": [],
             }
 
         context_text = "\n\n---\n\n".join(doc["text"] for doc in context_docs)
@@ -312,22 +349,32 @@ class ComplianceRagPipeline:
                 f"{doc['metadata'].get('framework', '')} {doc['metadata'].get('control_id', doc['id'])}"
                 for doc in context_docs
             ],
+            "retrieved_context": [_context_preview(d) for d in context_docs],
+            "usage": {"input_tokens": message.usage.input_tokens, "output_tokens": message.usage.output_tokens},
         }
 
     def query_stream(self, question: str, k: int = 5):
         """Generator version of query(); see CVERagPipeline.query_stream for the
-        event shape ("delta"/"done")."""
+        full event shape ("stage"/"delta"/"done")."""
+        yield "stage", {"message": f"Searching {self.retriever.collection.count():,} compliance controls…"}
+        t0 = time.perf_counter()
         context_docs = self.retrieve(question, k)
+        retrieval_ms = round((time.perf_counter() - t0) * 1000)
 
         if not context_docs:
             yield "done", {
                 "domain": "compliance",
                 "answer": "No relevant compliance control found in the index for this question.",
                 "sources": [],
+                "retrieved_context": [],
+                "timing": {"retrieval_ms": retrieval_ms, "generation_ms": 0},
             }
             return
 
+        yield "stage", {"message": f"Retrieved {len(context_docs)} source(s) in {retrieval_ms}ms — generating answer…"}
+
         context_text = "\n\n---\n\n".join(doc["text"] for doc in context_docs)
+        t1 = time.perf_counter()
         with self.llm.messages.stream(
             model=LLM_MODEL,
             max_tokens=1024,
@@ -338,6 +385,8 @@ class ComplianceRagPipeline:
             for chunk in stream.text_stream:
                 answer += chunk
                 yield "delta", chunk
+            final_message = stream.get_final_message()
+        generation_ms = round((time.perf_counter() - t1) * 1000)
 
         yield "done", {
             "domain": "compliance",
@@ -346,6 +395,12 @@ class ComplianceRagPipeline:
                 f"{doc['metadata'].get('framework', '')} {doc['metadata'].get('control_id', doc['id'])}"
                 for doc in context_docs
             ],
+            "retrieved_context": [_context_preview(d) for d in context_docs],
+            "timing": {"retrieval_ms": retrieval_ms, "generation_ms": generation_ms},
+            "usage": {
+                "input_tokens": final_message.usage.input_tokens,
+                "output_tokens": final_message.usage.output_tokens,
+            },
         }
 
 

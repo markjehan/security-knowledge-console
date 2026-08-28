@@ -66,7 +66,7 @@ def _stream_response(generator):
                 if kind == "delta":
                     yield _sse_event("delta", {"text": payload})
                 else:
-                    yield _sse_event("done", payload)
+                    yield _sse_event(kind, payload)
         except APIError as err:
             yield _sse_event("stream_error", {
                 "error": "The language model backend returned an error. Check that "
@@ -378,4 +378,8 @@ def healthz():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    # threaded=True: the SSE streaming endpoints hold a connection open for
+    # the duration of an LLM generation, which would otherwise block every
+    # other request (including the dashboard's own polling) on Flask's
+    # single-threaded dev server.
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)

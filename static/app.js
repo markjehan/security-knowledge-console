@@ -301,6 +301,38 @@ function sourceChipHtml(source) {
   return `<span class="source-chip">${escapeHtml(source)}</span>`;
 }
 
+function contextPanelHtml(retrievedContext) {
+  if (!retrievedContext || !retrievedContext.length) return "";
+  const items = retrievedContext.map((doc) => {
+    const meta = doc.metadata || {};
+    const metaBits = [];
+    if (meta.severity) metaBits.push(`<span class="sev-badge ${(SEV_CLASS && SEV_CLASS[meta.severity]) || "unknown"}">${escapeHtml(meta.severity)}</span>`);
+    if (meta.framework) metaBits.push(escapeHtml(meta.framework));
+    return `
+      <details class="context-item">
+        <summary><span class="context-id">${escapeHtml(doc.id)}</span>${metaBits.length ? `<span class="context-meta">${metaBits.join(" ")}</span>` : ""}</summary>
+        <div class="context-text">${escapeHtml(doc.text)}</div>
+      </details>`;
+  }).join("");
+  return `
+    <details class="context-panel">
+      <summary class="context-panel-summary">📄 Show retrieved context (${retrievedContext.length} passage${retrievedContext.length > 1 ? "s" : ""} the model was given)</summary>
+      <div class="context-panel-body">${items}</div>
+    </details>`;
+}
+
+function metricsRowHtml(data) {
+  const bits = [];
+  if (data.timing) {
+    bits.push(`${data.timing.retrieval_ms}ms retrieval`);
+    if (data.timing.generation_ms) bits.push(`${(data.timing.generation_ms / 1000).toFixed(1)}s generation`);
+  }
+  if (data.usage) {
+    bits.push(`${data.usage.input_tokens.toLocaleString()} in / ${data.usage.output_tokens.toLocaleString()} out tokens`);
+  }
+  return bits.length ? `<div class="metrics-row">${bits.join(" · ")}</div>` : "";
+}
+
 function buildFootHtml(data, routedTo) {
   let footHtml = "";
   if (routedTo) {
@@ -318,12 +350,14 @@ function buildFootHtml(data, routedTo) {
   if (data.error) {
     footHtml += `<div class="warn-row">⚠ ${escapeHtml(data.error)}</div>`;
   }
+  footHtml += contextPanelHtml(data.retrieved_context);
+  footHtml += metricsRowHtml(data);
   return footHtml;
 }
 
 function renderAnswerBlock(question, domain, data, routedTo) {
   const el = document.createElement("div");
-  el.className = "transmission";
+  el.className = "transmission transmission-enter";
   const tagClass = domain === "compliance" ? "compliance" : "cve";
   const tagLabel = domain === "compliance" ? "Compliance" : "CVE";
   const footHtml = buildFootHtml(data, routedTo);
@@ -338,13 +372,14 @@ function renderAnswerBlock(question, domain, data, routedTo) {
   `;
   el.querySelector(".transmission-body").innerHTML = renderMarkdown(data.answer || data.error || "No response.");
   transmissionLog.prepend(el);
+  requestAnimationFrame(() => el.classList.add("transmission-enter-active"));
 }
 
 /* ---------- streaming answer block ---------- */
 
 function createStreamingBlock(domain) {
   const el = document.createElement("div");
-  el.className = "transmission";
+  el.className = "transmission transmission-enter";
   const tagClass = domain === "compliance" ? "compliance" : "cve";
   const tagLabel = domain === "compliance" ? "Compliance" : "CVE";
   el.innerHTML = `
@@ -352,22 +387,32 @@ function createStreamingBlock(domain) {
       <span class="transmission-tag ${tagClass}">${tagLabel}</span>
       <span>${new Date().toLocaleTimeString()}</span>
     </div>
+    <div class="stage-line" hidden></div>
     <div class="transmission-body"><span class="stream-cursor"></span></div>
   `;
   transmissionLog.prepend(el);
+  requestAnimationFrame(() => el.classList.add("transmission-enter-active"));
   return {
     el,
     bodyEl: el.querySelector(".transmission-body"),
+    stageEl: el.querySelector(".stage-line"),
     raw: "",
   };
 }
 
+function setStage(block, message) {
+  block.stageEl.hidden = false;
+  block.stageEl.innerHTML = `<span class="stage-spinner"></span>${escapeHtml(message)}`;
+}
+
 function appendStreamingChunk(block, chunk) {
+  block.stageEl.hidden = true;
   block.raw += chunk;
   block.bodyEl.innerHTML = renderMarkdown(block.raw) + '<span class="stream-cursor"></span>';
 }
 
 function finalizeStreamingBlock(block, data, routedTo) {
+  block.stageEl.hidden = true;
   block.bodyEl.innerHTML = renderMarkdown(data.answer || block.raw || "No response.");
   const footHtml = buildFootHtml(data, routedTo);
   if (footHtml) {
@@ -392,6 +437,9 @@ function streamQuery(question, endpoint, domain, routedToLabel) {
       resolve();
     };
 
+    source.addEventListener("stage", (e) => {
+      setStage(block, JSON.parse(e.data).message);
+    });
     source.addEventListener("delta", (e) => {
       appendStreamingChunk(block, JSON.parse(e.data).text);
     });
@@ -404,6 +452,7 @@ function streamQuery(question, endpoint, domain, routedToLabel) {
     source.addEventListener("stream_error", (e) => {
       const data = JSON.parse(e.data);
       finalizeStreamingBlock(block, { ...data, answer: block.raw }, routedToLabel);
+      showToast(data.error || "The language model backend returned an error.", "error");
       pushHistory(question, "error");
       finish();
     });
@@ -414,6 +463,7 @@ function streamQuery(question, endpoint, domain, routedToLabel) {
     source.addEventListener("error", () => {
       if (!block.raw) {
         finalizeStreamingBlock(block, { error: "Streaming connection failed or was interrupted." }, routedToLabel);
+        showToast("Could not reach the console backend. Check your connection and try again.", "error");
         pushHistory(question, "error");
       } else {
         finalizeStreamingBlock(block, { answer: block.raw }, routedToLabel);
@@ -451,9 +501,16 @@ function streamAutoQuery(question) {
       if (routed_to === "both") {
         cveBlock = createStreamingBlock("cve");
         complianceBlock = createStreamingBlock("compliance");
+        setStage(cveBlock, "Ambiguous question — querying both domains…");
+        setStage(complianceBlock, "Ambiguous question — querying both domains…");
       } else {
         singleBlock = createStreamingBlock(routed_to);
       }
+    });
+    source.addEventListener("stage", (e) => {
+      // Only the single-domain path streams stage progress; the ambiguous
+      // "both" path resolves both pipelines in one blocking call server-side.
+      if (singleBlock) setStage(singleBlock, JSON.parse(e.data).message);
     });
     source.addEventListener("delta", (e) => {
       if (singleBlock) appendStreamingChunk(singleBlock, JSON.parse(e.data).text);
@@ -478,11 +535,15 @@ function streamAutoQuery(question) {
       if (cveBlock) finalizeStreamingBlock(cveBlock, data, bothLabel);
       if (complianceBlock) finalizeStreamingBlock(complianceBlock, data, bothLabel);
       if (!singleBlock && !cveBlock && !complianceBlock) renderAnswerBlock(question, "cve", data);
+      showToast(data.error || "The language model backend returned an error.", "error");
       pushHistory(question, "error");
       finish();
     });
     source.addEventListener("error", () => {
       const fallback = { error: "Streaming connection failed or was interrupted." };
+      if (!singleBlock?.raw && !cveBlock?.raw && !complianceBlock?.raw) {
+        showToast("Could not reach the console backend. Check your connection and try again.", "error");
+      }
       if (singleBlock && !singleBlock.raw) finalizeStreamingBlock(singleBlock, fallback, null);
       else if (singleBlock) finalizeStreamingBlock(singleBlock, { answer: singleBlock.raw }, null);
       if (cveBlock && !cveBlock.raw) finalizeStreamingBlock(cveBlock, fallback, bothLabel);
@@ -775,6 +836,184 @@ async function loadRefreshStatus() {
     el.textContent = "REFRESH STATUS UNKNOWN";
   }
 }
+
+/* ---------- toasts ---------- */
+
+const toastStack = document.getElementById("toast-stack");
+
+function showToast(message, kind = "info", timeoutMs = 4500) {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  toastStack.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("toast-show"));
+  setTimeout(() => {
+    el.classList.remove("toast-show");
+    setTimeout(() => el.remove(), 200);
+  }, timeoutMs);
+}
+
+/* ---------- command palette ---------- */
+
+const paletteOverlay = document.getElementById("palette-overlay");
+const paletteInput = document.getElementById("palette-input");
+const paletteResults = document.getElementById("palette-results");
+
+const PALETTE_ACTIONS = [
+  { kind: "view", label: "Dashboard", run: () => showView("dashboard") },
+  { kind: "view", label: "Query — Auto Route", run: () => showView("query", "auto") },
+  { kind: "view", label: "Query — CVE Search", run: () => showView("query", "cve") },
+  { kind: "view", label: "Query — Compliance Docs", run: () => showView("query", "compliance") },
+  { kind: "view", label: "CVE Browser", run: () => showView("cvebrowser") },
+  { kind: "view", label: "Framework Browser", run: () => showView("browser") },
+  { kind: "view", label: "Session History", run: () => showView("history") },
+  ...Object.entries(EXAMPLE_QUESTIONS).flatMap(([mode, questions]) =>
+    questions.map((q) => ({
+      kind: `ask · ${mode}`,
+      label: q,
+      run: () => { showView("query", mode); queryInput.value = ""; submitQuery(q); },
+    }))
+  ),
+];
+
+let paletteActiveIndex = 0;
+let paletteFiltered = PALETTE_ACTIONS;
+
+function openPalette() {
+  paletteOverlay.hidden = false;
+  paletteInput.value = "";
+  renderPaletteResults("");
+  paletteInput.focus();
+}
+
+function closePalette() {
+  paletteOverlay.hidden = true;
+}
+
+function renderPaletteResults(query) {
+  const q = query.trim().toLowerCase();
+  paletteFiltered = q ? PALETTE_ACTIONS.filter((a) => a.label.toLowerCase().includes(q)) : PALETTE_ACTIONS;
+  paletteActiveIndex = 0;
+  paletteResults.innerHTML = "";
+  if (!paletteFiltered.length) {
+    paletteResults.innerHTML = `<div class="palette-item">No matches</div>`;
+    return;
+  }
+  paletteFiltered.forEach((action, i) => {
+    const item = document.createElement("div");
+    item.className = "palette-item" + (i === 0 ? " active" : "");
+    item.innerHTML = `<span></span><span class="palette-item-kind">${escapeHtml(action.kind)}</span>`;
+    item.querySelector("span").textContent = action.label;
+    item.addEventListener("click", () => { action.run(); closePalette(); });
+    paletteResults.appendChild(item);
+  });
+}
+
+function movePaletteSelection(delta) {
+  if (!paletteFiltered.length) return;
+  paletteActiveIndex = (paletteActiveIndex + delta + paletteFiltered.length) % paletteFiltered.length;
+  [...paletteResults.children].forEach((el, i) => el.classList.toggle("active", i === paletteActiveIndex));
+  paletteResults.children[paletteActiveIndex]?.scrollIntoView({ block: "nearest" });
+}
+
+paletteInput.addEventListener("input", (e) => renderPaletteResults(e.target.value));
+paletteInput.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") { e.preventDefault(); movePaletteSelection(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); movePaletteSelection(-1); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    const action = paletteFiltered[paletteActiveIndex];
+    if (action) { action.run(); closePalette(); }
+  } else if (e.key === "Escape") {
+    closePalette();
+  }
+});
+paletteOverlay.addEventListener("click", (e) => { if (e.target === paletteOverlay) closePalette(); });
+document.getElementById("palette-trigger").addEventListener("click", openPalette);
+
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    openPalette();
+  } else if (e.key === "/" && document.activeElement.tagName !== "INPUT" && paletteOverlay.hidden) {
+    e.preventDefault();
+    if (state.view !== "query") showView("query", state.queryMode);
+    queryInput.focus();
+  }
+});
+
+/* ---------- architecture modal ---------- */
+
+const architectureOverlay = document.getElementById("architecture-overlay");
+document.getElementById("architecture-body").innerHTML = `
+  <h3>Pipeline</h3>
+  <p>Each question is classified by a keyword-overlap <code>QueryRouter</code> into
+  <strong>CVE</strong>, <strong>Compliance</strong>, or <strong>both</strong> (when ambiguous) —
+  no LLM call needed for routing, so it's instant and free.</p>
+  <p>The routed pipeline runs a <strong>hybrid retrieval</strong>: an exact CVE-ID lookup
+  (bypasses ranking entirely), a Chroma vector search, and a BM25 keyword search — merged
+  round-robin so neither source can crowd the other out.</p>
+  <p>Retrieved passages are the <em>only</em> context sent to the model — the system prompt
+  forbids citing anything not literally present in them.</p>
+  <h3>Grounding check</h3>
+  <p>After the model answers, every CVE ID it cites is checked against the IDs actually
+  retrieved. Anything cited but not retrieved is flagged inline as
+  <code>[UNVERIFIED]</code> instead of silently trusted — this is what stops a
+  hallucinated CVE ID from reaching you as if it were real.</p>
+  <h3>Cross-domain linking</h3>
+  <p>Each CVE's CWE weakness type(s) are matched against a curated NIST/CIS/ISO control
+  corpus, so a vulnerability answer can also surface which compliance controls it
+  implicates — proven with a citation, not asserted.</p>
+  <h3>Why streaming</h3>
+  <p>Answers stream token-by-token from the model as they're generated. The grounding
+  check still needs the complete answer text, so it only runs once streaming ends —
+  you'll see the ⚠ unverified flag (if any) appear in the citation footer right after
+  the last token lands.</p>
+`;
+
+function openArchitectureModal() { architectureOverlay.hidden = false; }
+function closeArchitectureModal() { architectureOverlay.hidden = true; }
+document.getElementById("architecture-trigger").addEventListener("click", openArchitectureModal);
+document.getElementById("architecture-close").addEventListener("click", closeArchitectureModal);
+architectureOverlay.addEventListener("click", (e) => { if (e.target === architectureOverlay) closeArchitectureModal(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !architectureOverlay.hidden) closeArchitectureModal();
+});
+
+/* ---------- export session ---------- */
+
+function exportSessionMarkdown() {
+  const blocks = [...transmissionLog.querySelectorAll(".transmission")];
+  if (!blocks.length) {
+    showToast("Nothing to export yet — ask a question first.", "warn");
+    return;
+  }
+  const lines = [`# Security Knowledge Console — session export`, `Generated ${new Date().toISOString()}`, ""];
+  blocks.slice().reverse().forEach((block) => {
+    const tag = block.querySelector(".transmission-tag")?.textContent || "";
+    const isQuestion = tag.trim() === "Query";
+    const bodyText = block.querySelector(".transmission-body")?.textContent?.trim() || "";
+    if (isQuestion) {
+      lines.push(`## Q: ${bodyText}`, "");
+    } else {
+      lines.push(`**[${tag}]**`, "", bodyText, "");
+      const sources = [...block.querySelectorAll(".source-chip")].map((s) => s.textContent.trim());
+      if (sources.length) lines.push(`Sources: ${sources.join(", ")}`, "");
+    }
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ska-session-${Date.now()}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast("Session exported.", "info");
+}
+
+document.getElementById("history-export").addEventListener("click", exportSessionMarkdown);
 
 /* ---------- init ---------- */
 
