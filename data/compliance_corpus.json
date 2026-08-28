@@ -1,0 +1,122 @@
+[
+  {
+    "id": "NIST-800-53-SI-2",
+    "framework": "NIST SP 800-53 Rev. 5",
+    "control_id": "SI-2",
+    "title": "Flaw Remediation",
+    "cwe_links": ["CWE-1035"],
+    "text": "NIST SP 800-53 SI-2 (Flaw Remediation): Organizations must identify, report, and correct system flaws, including software vulnerabilities, in a timely manner. This includes testing patches before deployment, tracking remediation timelines based on risk, and incorporating flaw remediation into the configuration management process. Directly relevant to CVE/vulnerability patch management programs."
+  },
+  {
+    "id": "NIST-800-53-RA-5",
+    "framework": "NIST SP 800-53 Rev. 5",
+    "control_id": "RA-5",
+    "title": "Vulnerability Monitoring and Scanning",
+    "cwe_links": ["CWE-1035"],
+    "text": "NIST SP 800-53 RA-5 (Vulnerability Monitoring and Scanning): Organizations must monitor and scan for vulnerabilities in systems and applications on an ongoing basis, and when new vulnerabilities affecting the system are identified and reported. Requires using vulnerability intelligence sources (such as the NVD/CVE database) to prioritize remediation by severity and exploitability."
+  },
+  {
+    "id": "NIST-800-53-IA-2",
+    "framework": "NIST SP 800-53 Rev. 5",
+    "control_id": "IA-2",
+    "title": "Identification and Authentication (Organizational Users)",
+    "cwe_links": ["CWE-287", "CWE-306"],
+    "text": "NIST SP 800-53 IA-2 (Identification and Authentication): Systems must uniquely identify and authenticate organizational users before granting access. Weak or missing authentication mechanisms in software (e.g. CWE-287 Improper Authentication, CWE-306 Missing Authentication for Critical Function) directly violate this control and require compensating controls or remediation."
+  },
+  {
+    "id": "NIST-800-53-AC-2",
+    "framework": "NIST SP 800-53 Rev. 5",
+    "control_id": "AC-2",
+    "title": "Account Management",
+    "cwe_links": ["CWE-287", "CWE-798"],
+    "text": "NIST SP 800-53 AC-2 (Account Management): Organizations must manage system accounts including establishment, activation, modification, review, and removal. Hardcoded credentials (CWE-798) and improper authentication (CWE-287) found in software components are considered account management failures under this control."
+  },
+  {
+    "id": "NIST-800-53-SC-8",
+    "framework": "NIST SP 800-53 Rev. 5",
+    "control_id": "SC-8",
+    "title": "Transmission Confidentiality and Integrity",
+    "cwe_links": ["CWE-319", "CWE-326"],
+    "text": "NIST SP 800-53 SC-8 (Transmission Confidentiality and Integrity): Systems must protect the confidentiality and integrity of transmitted information. Vulnerabilities involving cleartext transmission of sensitive data (CWE-319) or weak cryptography (CWE-326) represent violations of this control."
+  },
+  {
+    "id": "NIST-800-53-SI-10",
+    "framework": "NIST SP 800-53 Rev. 5",
+    "control_id": "SI-10",
+    "title": "Information Input Validation",
+    "cwe_links": ["CWE-89", "CWE-79", "CWE-77"],
+    "text": "NIST SP 800-53 SI-10 (Information Input Validation): Systems must check the validity of information inputs. Injection vulnerabilities such as SQL Injection (CWE-89), Cross-Site Scripting (CWE-79), and Command Injection (CWE-77) are direct violations of this control and are common root causes of high-severity CVEs."
+  },
+  {
+    "id": "NIST-CSF-PR.IP-12",
+    "framework": "NIST Cybersecurity Framework",
+    "control_id": "PR.IP-12",
+    "title": "Vulnerability Management Plan",
+    "cwe_links": ["CWE-1035"],
+    "text": "NIST CSF PR.IP-12: A vulnerability management plan is developed and implemented, covering identification, prioritization (typically via CVSS scoring), remediation timelines, and verification of fixes across the organization's asset inventory."
+  },
+  {
+    "id": "NIST-CSF-DE.CM-8",
+    "framework": "NIST Cybersecurity Framework",
+    "control_id": "DE.CM-8",
+    "title": "Vulnerability Scans Performed",
+    "cwe_links": ["CWE-1035"],
+    "text": "NIST CSF DE.CM-8: Vulnerability scans are performed regularly against organizational systems to detect known CVEs and misconfigurations, feeding results into the risk management and patching process."
+  },
+  {
+    "id": "CIS-Control-07",
+    "framework": "CIS Critical Security Controls v8",
+    "control_id": "CIS-07",
+    "title": "Continuous Vulnerability Management",
+    "cwe_links": ["CWE-1035"],
+    "text": "CIS Control 7 (Continuous Vulnerability Management): Develop a plan to continuously assess and track vulnerabilities on all enterprise assets, using authoritative sources of vulnerability information (such as NVD/CVE feeds) to remediate and minimize the window of opportunity for attackers."
+  },
+  {
+    "id": "CIS-Control-04",
+    "framework": "CIS Critical Security Controls v8",
+    "control_id": "CIS-04",
+    "title": "Secure Configuration of Enterprise Assets and Software",
+    "cwe_links": ["CWE-16", "CWE-1188"],
+    "text": "CIS Control 4 (Secure Configuration): Establish and maintain the secure configuration of enterprise assets and software, addressing default/insecure configurations (CWE-1188 Insecure Default Initialization, CWE-16 Configuration) that frequently underlie exploitable CVEs."
+  },
+  {
+    "id": "CIS-Control-06",
+    "framework": "CIS Critical Security Controls v8",
+    "control_id": "CIS-06",
+    "title": "Access Control Management",
+    "cwe_links": ["CWE-287", "CWE-269"],
+    "text": "CIS Control 6 (Access Control Management): Use processes and tools to create, assign, manage, and revoke access credentials and privileges. Improper privilege management (CWE-269) and broken authentication (CWE-287) undermine this control."
+  },
+  {
+    "id": "CIS-Control-16",
+    "framework": "CIS Critical Security Controls v8",
+    "control_id": "CIS-16",
+    "title": "Application Software Security",
+    "cwe_links": ["CWE-89", "CWE-79", "CWE-502"],
+    "text": "CIS Control 16 (Application Software Security): Manage the security life cycle of in-house developed, hosted, or acquired software to prevent, detect, and remediate security weaknesses including injection flaws (CWE-89, CWE-79) and insecure deserialization (CWE-502)."
+  },
+  {
+    "id": "ISO27001-A.8.8",
+    "framework": "ISO/IEC 27001:2022 Annex A (control title reference only)",
+    "control_id": "A.8.8",
+    "title": "Management of Technical Vulnerabilities",
+    "cwe_links": ["CWE-1035"],
+    "text": "ISO/IEC 27001 Annex A.8.8 addresses obtaining information about technical vulnerabilities in a timely manner, evaluating exposure, and taking appropriate remediation measures. Note: only the control title/topic is reproduced here per ISO licensing; consult the licensed standard for full control text."
+  },
+  {
+    "id": "ISO27001-A.5.24",
+    "framework": "ISO/IEC 27001:2022 Annex A (control title reference only)",
+    "control_id": "A.5.24",
+    "title": "Information Security Incident Management Planning and Preparation",
+    "cwe_links": [],
+    "text": "ISO/IEC 27001 Annex A.5.24 covers planning and preparing for information security incident management, including roles, responsibilities, and procedures. Note: only the control title/topic is reproduced here per ISO licensing; consult the licensed standard for full control text."
+  },
+  {
+    "id": "ISO27001-A.8.9",
+    "framework": "ISO/IEC 27001:2022 Annex A (control title reference only)",
+    "control_id": "A.8.9",
+    "title": "Configuration Management",
+    "cwe_links": ["CWE-16", "CWE-1188"],
+    "text": "ISO/IEC 27001 Annex A.8.9 addresses establishing, documenting, implementing, monitoring, and reviewing secure configurations for hardware, software, services, and networks. Note: only the control title/topic is reproduced here per ISO licensing; consult the licensed standard for full control text."
+  }
+]

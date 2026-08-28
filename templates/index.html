@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security Knowledge Console</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" id="rail">
+      <div class="rail-brand">
+        <div class="rail-brand-mark">SKA</div>
+        <div class="rail-brand-text">
+          <span class="rail-brand-name">Security Console</span>
+          <span class="rail-brand-sub">Vulnerability &amp; Compliance</span>
+        </div>
+      </div>
+
+      <div class="rail-status">
+        <span class="status-dot"></span>
+        <span>INDEX ONLINE &middot; <span id="rail-cve-count">&mdash;</span> CVEs &middot; <span id="rail-control-count">&mdash;</span> CONTROLS</span>
+      </div>
+
+      <nav class="rail-nav">
+        <div class="rail-nav-label">Console</div>
+        <button class="nav-item active" data-view="dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M12 13l4-4"/><circle cx="12" cy="13" r="1"/></svg>
+          Dashboard
+        </button>
+        <button class="nav-item" data-view="query" data-mode="auto">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          Query &mdash; Auto
+        </button>
+        <button class="nav-item" data-view="query" data-mode="cve">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/></svg>
+          CVE Search
+        </button>
+        <button class="nav-item" data-view="query" data-mode="compliance">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4h8l3 3v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 10h6M9 14h6M9 18h3"/></svg>
+          Compliance Docs
+        </button>
+        <button class="nav-item" data-view="cvebrowser">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/><path d="M9.5 12l1.8 1.8L14.5 10"/></svg>
+          CVE Browser
+        </button>
+        <button class="nav-item" data-view="browser">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8l9-5 9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+          Framework Browser
+        </button>
+        <button class="nav-item" data-view="history">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+          History
+        </button>
+      </nav>
+
+      <div class="rail-footer">
+        MSc Research &mdash; AI Application<br />
+        Development &amp; Cloud Deployment
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="topstrip">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button class="rail-toggle" id="rail-toggle" aria-label="Toggle navigation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <span class="topstrip-title" id="topstrip-title">Dashboard</span>
+        </div>
+        <div class="topstrip-meta">
+          <span>INDEX <strong id="topstrip-cves">&mdash;</strong> CVE / <strong id="topstrip-controls">&mdash;</strong> CTRL</span>
+          <span class="divider"></span>
+          <span id="refresh-status">LAST REFRESH: &mdash;</span>
+          <span class="divider"></span>
+          <span id="clock">&mdash;</span>
+        </div>
+      </div>
+
+      <!-- DASHBOARD VIEW -->
+      <section class="view" id="view-dashboard">
+        <div class="view-heading">
+          <div>
+            <h1>Mission Overview</h1>
+            <p>Live index status across both retrieval domains.</p>
+          </div>
+        </div>
+
+        <div class="panel" id="importance-panel" style="margin-bottom:20px; padding:16px 18px; display:flex; align-items:center; gap:16px; border-color: var(--route);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color: var(--route); flex-shrink:0;"><path d="M3 8l9-5 9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+          <div style="flex:1;">
+            <div style="font-family: var(--font-label); font-weight:700; font-size:13px; color: var(--ink); letter-spacing:0.01em;">
+              Why this matters
+            </div>
+            <div style="font-size:12.5px; color: var(--ink-dim); margin-top:2px;" id="importance-text">
+              Calculating cross-domain coverage…
+            </div>
+          </div>
+        </div>
+
+        <div class="gauge-row" id="gauge-row">
+          <div class="gauge-panel">
+            <span class="gauge-label">CVE Records</span>
+            <svg class="gauge-dial" viewBox="0 0 132 78"><path d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#232b32" stroke-width="8" stroke-linecap="round"/><path id="gauge-cve-arc" d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#4ade80" stroke-width="8" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="176"/></svg>
+            <span class="gauge-value" id="gauge-cve-value">&mdash;</span>
+            <span class="gauge-sub">INDEXED</span>
+          </div>
+          <div class="gauge-panel">
+            <span class="gauge-label">Critical Severity</span>
+            <svg class="gauge-dial" viewBox="0 0 132 78"><path d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#232b32" stroke-width="8" stroke-linecap="round"/><path id="gauge-crit-arc" d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#f2495c" stroke-width="8" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="176"/></svg>
+            <span class="gauge-value" id="gauge-crit-value">&mdash;</span>
+            <span class="gauge-sub">CVSS CRITICAL</span>
+          </div>
+          <div class="gauge-panel">
+            <span class="gauge-label">Compliance Controls</span>
+            <svg class="gauge-dial" viewBox="0 0 132 78"><path d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#232b32" stroke-width="8" stroke-linecap="round"/><path id="gauge-ctrl-arc" d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#b98af0" stroke-width="8" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="176"/></svg>
+            <span class="gauge-value" id="gauge-ctrl-value">&mdash;</span>
+            <span class="gauge-sub">INDEXED</span>
+          </div>
+          <div class="gauge-panel">
+            <span class="gauge-label">Frameworks</span>
+            <svg class="gauge-dial" viewBox="0 0 132 78"><path d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#232b32" stroke-width="8" stroke-linecap="round"/><path id="gauge-fw-arc" d="M10 72 A56 56 0 0 1 122 72" fill="none" stroke="#6fd3e0" stroke-width="8" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="176"/></svg>
+            <span class="gauge-value" id="gauge-fw-value">&mdash;</span>
+            <span class="gauge-sub">TRACKED</span>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-head"><h2>Severity Distribution &mdash; CVE Index</h2></div>
+            <div class="panel-body">
+              <div class="severity-bar" id="severity-bar"></div>
+              <div class="severity-legend" id="severity-legend"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Framework Coverage</h2></div>
+            <div class="panel-body">
+              <div class="framework-list" id="framework-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- QUERY VIEW (CVE / Compliance / Auto share this shell) -->
+      <section class="view" id="view-query" hidden>
+        <div class="view-heading">
+          <div>
+            <h1 id="query-title">Query &mdash; Auto Route</h1>
+            <p id="query-sub">Ask a question; the console routes it to the right retrieval domain.</p>
+          </div>
+        </div>
+
+        <div class="mode-strip">
+          <button class="mode-btn active" data-qmode="auto">Auto</button>
+          <button class="mode-btn" data-qmode="cve">CVE Search</button>
+          <button class="mode-btn" data-qmode="compliance">Compliance Docs</button>
+        </div>
+
+        <form class="query-form" id="query-form">
+          <input class="query-input" id="query-input" type="text" placeholder="e.g. What CVEs affect Apache 2.4.49?" autocomplete="off" required />
+          <button class="query-submit" type="submit">Transmit</button>
+        </form>
+
+        <div class="transmission-log" id="transmission-log" aria-live="polite" aria-atomic="false"></div>
+      </section>
+
+      <!-- CVE BROWSER VIEW -->
+      <section class="view" id="view-cvebrowser" hidden>
+        <div class="view-heading">
+          <div>
+            <h1>CVE Browser</h1>
+            <p>Every indexed CVE, newest first by default. Search, filter by severity, and sort — this is the direct-lookup path when you don't want to phrase a question.</p>
+          </div>
+        </div>
+
+        <div class="legend-toolbar">
+          <input class="query-input" id="cve-search" type="text" placeholder="Search CVE ID or description…" style="max-width: 320px; padding: 8px 12px; font-size: 12.5px;" />
+          <button class="legend-filter active" data-sev="">ALL SEVERITY</button>
+          <button class="legend-filter" data-sev="CRITICAL">CRITICAL</button>
+          <button class="legend-filter" data-sev="HIGH">HIGH</button>
+          <button class="legend-filter" data-sev="MEDIUM">MEDIUM</button>
+          <button class="legend-filter" data-sev="LOW">LOW</button>
+          <span style="flex:1"></span>
+          <button class="legend-filter active" data-sort="published_desc">NEWEST</button>
+          <button class="legend-filter" data-sort="severity_desc">SEVERITY</button>
+        </div>
+
+        <div class="legend-table" id="cve-table">
+          <div class="legend-row legend-header" style="grid-template-columns: 150px 90px 70px 1fr 130px;">
+            <span>CVE ID</span><span>Severity</span><span>Score</span><span>Summary</span><span>Published</span>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
+          <span id="cve-count-label" class="gauge-sub"></span>
+          <div style="display:flex; gap:8px;">
+            <button class="legend-filter" id="cve-prev">← PREV</button>
+            <button class="legend-filter" id="cve-next">NEXT →</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- FRAMEWORK BROWSER VIEW -->
+      <section class="view" id="view-browser" hidden>
+        <div class="view-heading">
+          <div>
+            <h1>Framework Browser</h1>
+            <p>Fixed legend of every indexed control. Rows tagged with a CWE link are the routes a CVE's weakness type can draw across this terrain.</p>
+          </div>
+        </div>
+
+        <div class="legend-toolbar" id="framework-filters"></div>
+
+        <div class="legend-table" id="legend-table">
+          <div class="legend-row legend-header">
+            <span>ID</span><span>Framework</span><span>Control</span><span>Linked Weaknesses</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- HISTORY VIEW -->
+      <section class="view" id="view-history" hidden>
+        <div class="view-heading">
+          <div>
+            <h1>Session History</h1>
+            <p>Queries transmitted this session (stored locally in this browser only).</p>
+          </div>
+        </div>
+        <button class="history-clear" id="history-clear">Clear history</button>
+        <div class="history-list" id="history-list">
+          <div class="empty-log">NO HISTORY YET</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
