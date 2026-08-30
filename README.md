@@ -149,7 +149,21 @@ Both ingest commands are idempotent (`collection.upsert` by CVE ID / control ID)
 re-running them to add more products or controls is safe and won't create duplicates.
 
 ## 9. Deployment Details
-_Fill in once deployed:_ cloud provider, service used, region, and the public URL.
+- **Cloud provider/service:** Google Cloud Run (`us-central1`), deployed via
+  `gcloud run deploy --source .` (builds the Dockerfile directly, no manual registry
+  push needed).
+- **Live URL:** https://cve-security-console-466739033080.us-central1.run.app
+- **Secrets:** `ANTHROPIC_API_KEY` is stored in Google Secret Manager and mounted as an
+  env var at deploy time (`--set-secrets`), never committed or passed as a plain
+  `--set-env-vars` value.
+- **Data:** the pre-built Chroma index (`data/chroma/`, ~428MB) ships baked into the
+  container image itself — Cloud Run source deploys otherwise default to `.gitignore`'s
+  exclusion rules (which keep `data/chroma/` out of the git repo), so a `.gcloudignore`
+  explicitly re-includes it for the deploy step specifically. To refresh the deployed
+  data, re-run `refresh_index.py` locally and redeploy.
+- **Resources:** 2GiB memory / 1 vCPU (the embedding model + in-memory BM25 index need
+  more than Cloud Run's 512MiB default), 300s timeout (covers a full LLM generation),
+  public/unauthenticated access.
 
 ## Data Freshness — Why Not "Live" Per-Query Lookup
 The index is a **snapshot**, refreshed on a schedule rather than queried live against
@@ -193,7 +207,7 @@ environment, rather than implying a live-update capability that isn't there.
 - `GET /api/controls` — full compliance control list for the Framework Browser.
 - `GET /api/refresh-status` — last scheduled-refresh run, or `scheduled: false` if
   `refresh_index.py` has never run in this environment.
-- `GET /healthz` — health check.
+- `GET /api/healthz` — health check.
 
 ## 11. Docker Instructions
 The image **bakes in `data/chroma/` at build time** (it's excluded from git via

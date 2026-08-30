@@ -23,6 +23,27 @@ MAX_QUESTION_LENGTH = 500
 COMPLIANCE_CORPUS_PATH = os.path.join(os.path.dirname(__file__), "data", "compliance_corpus.json")
 
 
+@app.after_request
+def set_security_headers(response):
+    """Baseline headers for a same-origin app with no third-party embeds or
+    cross-origin API usage. CSP is restrictive by design: no external script/
+    style/font hosts, no framing — tightened here rather than left to
+    browser defaults, since this serves a security-tooling audience."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "connect-src 'self'; "
+        "img-src 'self' data:; "
+        "frame-ancestors 'none'"
+    )
+    return response
+
+
 def _validate_question(question: str) -> tuple | None:
     """Shared length/emptiness check. Returns an error response tuple, or
     None if the question is valid."""
@@ -119,7 +140,7 @@ def index():
 
 
 @app.route("/api/query/cve", methods=["POST"])
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute;30 per hour")
 def api_query_cve():
     question, err = _get_question()
     if err:
@@ -128,7 +149,7 @@ def api_query_cve():
 
 
 @app.route("/api/query/compliance", methods=["POST"])
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute;30 per hour")
 def api_query_compliance():
     question, err = _get_question()
     if err:
@@ -137,7 +158,7 @@ def api_query_compliance():
 
 
 @app.route("/api/query", methods=["POST"])
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute;30 per hour")
 def api_query_auto():
     """Auto-routed endpoint: classifies the question and queries the right
     pipeline (or both, merged, if ambiguous)."""
@@ -167,7 +188,7 @@ def api_query_auto():
 
 
 @app.route("/api/query/cve/stream")
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute;30 per hour")
 def api_query_cve_stream():
     question, err = _get_question_from_args()
     if err:
@@ -176,7 +197,7 @@ def api_query_cve_stream():
 
 
 @app.route("/api/query/compliance/stream")
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute;30 per hour")
 def api_query_compliance_stream():
     question, err = _get_question_from_args()
     if err:
@@ -185,7 +206,7 @@ def api_query_compliance_stream():
 
 
 @app.route("/api/query/stream")
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute;30 per hour")
 def api_query_auto_stream():
     """Auto-routed streaming endpoint, single connection. Always emits a
     "meta" event first announcing the routing decision, so the frontend
@@ -231,50 +252,72 @@ def api_query_auto_stream():
     )
 
 
+_stats_cache = None
+_stats_cache_count = None
+_stats_cache_lock = threading.Lock()
+
+
 @app.route("/api/stats")
 def api_stats():
-    """Counts + severity breakdown for the dashboard instrument panel."""
+    """Counts + severity breakdown for the dashboard instrument panel.
+
+    Cached and invalidated on CVE-count change, same heuristic as the CVE
+    Browser cache — the dashboard is the landing view, so recomputing this
+    by re-paging the full ~54k-record index on every single load was a real
+    (if not security-critical) cost worth removing."""
+    global _stats_cache, _stats_cache_count
+
     cve_collection = get_cve_pipeline().retriever.collection
-    compliance_collection = get_compliance_pipeline().retriever.collection
+    live_count = cve_collection.count()
 
-    cve_total = cve_collection.count()
-    severity_counts = Counter()
-    cwe_seen = set()
-    offset = 0
-    page_size = 5000
-    while True:
-        page = cve_collection.get(include=["metadatas"], limit=page_size, offset=offset)
-        ids = page["ids"]
-        if not ids:
-            break
-        for meta in page["metadatas"]:
-            severity_counts[meta.get("severity", "UNKNOWN")] += 1
-            cwe_seen.update(c for c in meta.get("cwe_ids", "").split(",") if c)
-        offset += len(ids)
-        if len(ids) < page_size:
-            break
+    if _stats_cache is not None and live_count != _stats_cache_count:
+        _stats_cache = None
 
-    with open(COMPLIANCE_CORPUS_PATH) as f:
-        controls = json.load(f)
-    frameworks = Counter(c["framework"] for c in controls)
+    if _stats_cache is None:
+        with _stats_cache_lock:
+            if _stats_cache is None:
+                compliance_collection = get_compliance_pipeline().retriever.collection
 
-    # "Importance" metric: how many compliance controls actually cross-link to a
-    # weakness type present somewhere in the live CVE index right now — this is
-    # the tool's core, provable value (not a vanity count), so it's surfaced on
-    # the dashboard rather than left implicit.
-    linked_controls = sum(
-        1 for c in controls if set(c.get("cwe_links", [])) & cwe_seen
-    )
-    high_severity = severity_counts.get("CRITICAL", 0) + severity_counts.get("HIGH", 0)
+                severity_counts = Counter()
+                cwe_seen = set()
+                offset = 0
+                page_size = 5000
+                while True:
+                    page = cve_collection.get(include=["metadatas"], limit=page_size, offset=offset)
+                    ids = page["ids"]
+                    if not ids:
+                        break
+                    for meta in page["metadatas"]:
+                        severity_counts[meta.get("severity", "UNKNOWN")] += 1
+                        cwe_seen.update(c for c in meta.get("cwe_ids", "").split(",") if c)
+                    offset += len(ids)
+                    if len(ids) < page_size:
+                        break
 
-    return jsonify({
-        "cve_total": cve_total,
-        "severity_counts": dict(severity_counts),
-        "compliance_total": compliance_collection.count(),
-        "framework_counts": dict(frameworks),
-        "linked_controls": linked_controls,
-        "high_severity_total": high_severity,
-    })
+                with open(COMPLIANCE_CORPUS_PATH) as f:
+                    controls = json.load(f)
+                frameworks = Counter(c["framework"] for c in controls)
+
+                # "Importance" metric: how many compliance controls actually cross-link
+                # to a weakness type present somewhere in the live CVE index right now —
+                # this is the tool's core, provable value (not a vanity count), so it's
+                # surfaced on the dashboard rather than left implicit.
+                linked_controls = sum(
+                    1 for c in controls if set(c.get("cwe_links", [])) & cwe_seen
+                )
+                high_severity = severity_counts.get("CRITICAL", 0) + severity_counts.get("HIGH", 0)
+
+                _stats_cache = {
+                    "cve_total": live_count,
+                    "severity_counts": dict(severity_counts),
+                    "compliance_total": compliance_collection.count(),
+                    "framework_counts": dict(frameworks),
+                    "linked_controls": linked_controls,
+                    "high_severity_total": high_severity,
+                }
+                _stats_cache_count = live_count
+
+    return jsonify(_stats_cache)
 
 
 @app.route("/api/controls")
@@ -296,8 +339,17 @@ def api_cves():
     collection wrapper) rather than re-paging Chroma on every request — with
     ~54k records this keeps browsing snappy without needing a real database.
     """
-    global _cve_browse_cache
+    global _cve_browse_cache, _cve_browse_cache_count
     collection = get_cve_pipeline().retriever.collection
+    live_count = collection.count()
+
+    # Invalidate on a record-count change (catches refresh_index.py adding new
+    # CVEs); a same-count *modification* to an existing record — e.g. a
+    # severity correction picked up by a refresh's lastModStartDate window —
+    # won't be caught by this check and will show stale until the count next
+    # moves or the process restarts. A cheap heuristic, not perfect freshness.
+    if _cve_browse_cache is not None and live_count != _cve_browse_cache_count:
+        _cve_browse_cache = None
 
     if _cve_browse_cache is None:
         # threaded=True means two first-time requests could race into this
@@ -327,6 +379,7 @@ def api_cves():
                     if len(ids) < page_size:
                         break
                 _cve_browse_cache = rows
+                _cve_browse_cache_count = live_count
 
     rows = _cve_browse_cache
 
@@ -364,6 +417,7 @@ def api_cves():
 
 
 _cve_browse_cache = None
+_cve_browse_cache_count = None
 _cve_browse_cache_lock = threading.Lock()
 
 
@@ -383,8 +437,13 @@ def api_refresh_status():
     return jsonify({"scheduled": True, **data})
 
 
-@app.route("/healthz")
+@app.route("/api/healthz")
 def healthz():
+    # Not /healthz: Cloud Run's edge reserves that exact path on auto-generated
+    # *.run.app URLs and serves its own generic 404 for it, never reaching this
+    # app at all — confirmed by testing, not assumed. /api/healthz avoids the
+    # collision; only the Dockerfile's internal container healthcheck and this
+    # README reference it, so nothing external depended on the old path.
     return jsonify({"status": "ok"})
 
 

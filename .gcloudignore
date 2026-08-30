@@ -1,0 +1,17 @@
+# Cloud Run source deploys default to .gitignore's rules when no
+# .gcloudignore exists — which silently excluded data/chroma/ (the actual
+# vector index) from the very first deploy, leaving the container with an
+# empty database despite a "successful" build. This file exists specifically
+# to override that: everything .gitignore excludes stays excluded EXCEPT the
+# one directory the running app actually needs at runtime.
+__pycache__/
+*.pyc
+.env
+venv/
+.venv/
+*.log
+.pytest_cache/
+.DS_Store
+.git/
+
+!data/chroma/
