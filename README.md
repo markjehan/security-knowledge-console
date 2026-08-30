@@ -161,8 +161,9 @@ re-running them to add more products or controls is safe and won't create duplic
   exclusion rules (which keep `data/chroma/` out of the git repo), so a `.gcloudignore`
   explicitly re-includes it for the deploy step specifically. To refresh the deployed
   data, re-run `refresh_index.py` locally and redeploy.
-- **Resources:** 2GiB memory / 1 vCPU (the embedding model + in-memory BM25 index need
-  more than Cloud Run's 512MiB default), 300s timeout (covers a full LLM generation),
+- **Resources:** 4GiB memory / 2 vCPU (the embedding model + in-memory BM25 index over
+  ~54k CVE records exceeded a 2GiB limit during testing — confirmed via Cloud Run's own
+  OOM-kill logs, not assumed), 300s timeout (covers a full LLM generation),
   public/unauthenticated access.
 
 ## Data Freshness — Why Not "Live" Per-Query Lookup
